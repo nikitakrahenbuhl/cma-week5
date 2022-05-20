@@ -1,0 +1,98 @@
+---
+title: "week-5"
+author: "Nikita Krähenbühl"
+date: "5/13/2022"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(readr)
+library(tidyverse)
+library(sf)
+library(terra)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tmap)
+library(rayshader)
+library(RColorBrewer)
+```
+
+# Task 1: Read Data
+
+```{r}
+wildschwein_BE <- read_delim("rawdata/wildschwein_BE_2056.csv",",") %>%
+  st_as_sf(coords = c("E", "N"), crs = 2056, remove = FALSE)
+
+fanel <- read_sf("rawdata/Feldaufnahmen_Fanel.gpkg")
+
+str(fanel)
+summary(fanel)
+
+plot(fanel)
+```
+What information does the dataset contain? Fields with vegetation types
+What is the geometry type of the dataset (possible types are: Point, Lines and Polygons)? Polygon
+What are the data types of the other columns? Character and Integer
+What is the coordinate system of the dataset? LV95
+
+
+# Task 2: Annotate Trajectories
+Filter to summer
+```{r}
+wildschwein_BE %>% 
+  filter(DatetimeUTC >= as.Date("2015-05-01") & DatetimeUTC < as.Date("2015-07-01")) -> ws_summer
+
+ggplot() +
+  geom_sf(data= fanel, aes(fill = Frucht)) +
+  geom_sf(data = ws_summer) + theme_void()
+
+st_join(ws_summer, fanel) %>%
+  mutate(round_DatetimeUTC = round_date(DatetimeUTC, unit = "hours"),
+         hours = format(round_DatetimeUTC, "%H"))-> ws_annotate
+
+```
+
+# Task 3: Explore the annotated dataset
+```{r}
+ws_annotate %>% 
+  group_by(Frucht, TierName) %>% 
+  summarise(minTime = min(round_DatetimeUTC), maxTime = max(round_DatetimeUTC), n=n()) %>% 
+  mutate(duration = as.numeric(difftime(maxTime, minTime, units="hours"))) %>% 
+  ggplot(.) + geom_bar(aes(x = hours, fill = Frucht))
+
+ws_annotate %>% 
+  group_by(Frucht, TierName) %>% 
+  mutate(duration = as.numeric(difftime(lead(DatetimeUTC),DatetimeUTC), units="hours")) -> t
+
+ws_annotate %>% 
+  ggplot(.) + geom_bar(aes(x = hours, fill = Frucht),
+                       position = "fill") + theme_classic() + facet_wrap(~TierName) + coord_polar()
+
+```
+
+# Task 4: Raster Data
+```{r}
+library(tmap)
+terra::rast("rawdata/vegetationshoehe_LFI.tif") -> vegetation
+
+```
+
+# Task 5: Extract Data from Raster
+```{r}
+terra::extract(vegetation, vect(wildschwein_BE)) %>% 
+  cbind(wildschwein_BE, .) %>% 
+  st_as_sf(.) -> wildschwein_BE
+
+
+wildschwein_BE %>% select(geometry, vegetationshoehe_LFI) %>% 
+ggplot() +
+  geom_sf(data = wildschwein_BE, aes(color = vegetationshoehe_LFI)) -> gg
+gg
+plot_gg(gg)
+
+
+ggplot() +
+  geom_point(data=wildschwein_BE, aes(x=E, y = N, color = vegetationshoehe_LFI)) + coord_fixed() -> gg1
+plot_gg(gg1)
+```
+
